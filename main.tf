@@ -1,40 +1,132 @@
 provider "aws" {
   region     = "us-east-1"
-  access_key = "AKIATWXEE5JSGIH7XIVQ"
-  secret_key = "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"
+  access_key = "AKIATWXEE5JSI2FSGT54"
+  secret_key = "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"
 }
+variable "vpc_cidr_block" {}
+variable "subnet_cidr_block" {}
+variable "public_key_location" {}
+variable "instance_type" {}
+variable "avail_zone" {}
+variable "env_prefix" {}
+variable "my_ip" {}
 
-variable "subnet_cidr_block" {
-  description = "subnet cidr block"
-}
-
-variable "vpc_cidr_block" {
-  description = "vpc cidr block"
-}
-
-resource "aws_vpc" "dev-vpc" {
+resource "aws_vpc" "myapp-vpc" {
   cidr_block = var.vpc_cidr_block
   tags = {
-    Name : "developement"
+    Name : "${var.env_prefix}-vpc"
 
   }
 }
 
-resource "aws_subnet" "dev-subnet1" {
-  vpc_id            = aws_vpc.dev-vpc.id
+resource "aws_subnet" "myapp-subnet1" {
+  vpc_id            = aws_vpc.myapp-vpc.id
   cidr_block        = var.subnet_cidr_block
-  availability_zone = "us-east-1a"
+  availability_zone = var.avail_zone
   tags = {
-    Name : "dev-subnet"
+    Name : "${var.env_prefix}-subnet1"
+
   }
 }
 
+resource "aws_internet_gateway" "myapp-igw" {
+  vpc_id = aws_vpc.myapp-vpc.id
+  tags = {
+    Name : "${var.env_prefix}-igw"
 
+  }
 
-output "dev-vpc-id" {
-  value = aws_vpc.dev-vpc.id
 }
 
-output "aws-subnet1" {
-  value = aws_subnet.dev-subnet1.id
+resource "aws_default_route_table" "main1-rtb" {
+  default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.myapp-igw.id
+  }
+  tags = {
+    Name : "${var.env_prefix}-main1-rtb"
+
+  }
+
+
 }
+
+resource "aws_default_security_group" "default-sg" {
+  vpc_id = aws_vpc.myapp-vpc.id
+
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip]
+  }
+
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port       = 0
+    to_port         = 0
+    protocol        = "-1"
+    cidr_blocks     = ["0.0.0.0/0"]
+    prefix_list_ids = []
+  }
+  tags = {
+    Name : "${var.env_prefix}-default-sg"
+
+  }
+}
+
+data "aws_ami" "ubuntu-image" {
+  most_recent = true
+  owners      = ["099720109477"]
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+  }
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+
+  }
+}
+
+output "aws_ami_id" {
+  value = data.aws_ami.ubuntu-image.id
+}
+
+resource "aws_key_pair" "ssh-key" {
+  key_name   = "server-key"
+  public_key = file(var.public_key_location)
+}
+
+resource "aws_instance" "myapp-server" {
+  ami           = data.aws_ami.ubuntu-image.id
+  instance_type = var.instance_type
+
+
+  subnet_id              = aws_subnet.myapp-subnet1.id
+  vpc_security_group_ids = [aws_default_security_group.default-sg.id]
+  availability_zone      = var.avail_zone
+
+  associate_public_ip_address = true
+  key_name                    = aws_key_pair.ssh-key.key_name
+
+  tags = {
+  Name : "${var.env_prefix}-server-tf"
+
+}
+
+}
+
+
+
+
